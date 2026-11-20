@@ -39,7 +39,7 @@ footer{color:var(--mut);text-align:center;padding:20px;font-size:13px}
 <div class="stat"><span>Total pendapatan seumur warung</span><b id="lifetime">Rp0</b></div>
 <div class="stat"><span>Cabang (prestise)</span><b id="branches">0</b></div>
 <div class="stat"><span>Bonus per cabang</span><b>+25% semua penghasilan</b></div>
-<p style="color:var(--mut);font-size:14px">Buka cabang mengulang permainan dari nol, tapi semua penghasilan naik permanen 25% per cabang. Tersedia setelah pendapatan seumur warung mencapai Rp10 juta.</p>
+<p style="color:var(--mut);font-size:14px">Buka cabang mengulang permainan dari nol, tapi semua penghasilan naik permanen 25% per cabang. Tersedia setelah pendapatan dalam satu putaran mencapai Rp10 juta; total seumur warung Tersedia setelah pendapatan seumur warung mencapai Rp10 juta. pencapaian tidak ikut tereset.</p>
 <button class="ghost" id="prestige">🏪 Buka Cabang Baru</button>
 <button class="ghost" id="reset">Hapus simpanan</button>
 </div>
@@ -58,37 +58,82 @@ const ITEMS=[
 {id:'barber',icon:'💈',name:'Barbershop',desc:'Potong rapi + pijat kepala gratis.',base:1100000,rps:290000},
 {id:'kafe',icon:'☕',name:'Kafe Kekinian',desc:'WiFi kencang, colokan di setiap meja.',base:5200000,rps:1250000},
 {id:'franchise',icon:'🏬',name:'Lisensi Franchise',desc:'Orang lain yang kerja, kamu terima royalti.',base:26000000,rps:5600000}];
-const ACH=[[1e6,'Kas pertama Rp1 juta'],[1e8,'Sultan warung: Rp100 juta seumur warung'],[25,'Kolektor: 25 aset dimiliki'],[1,'Cabang pertama dibuka'],[1e10,'Konglomerat: Rp10 miliar seumur warung']];
-let S=JSON.parse(localStorage.getItem('warungTycoon')||'null')||{money:0,lifetime:0,owned:{},branches:0,last:Date.now()};
+const PRESTIGE_NEED=1e7;
+let S;
+try{S=JSON.parse(localStorage.getItem('warungTycoon'))}catch(e){S=null}
+if(!S||typeof S.money!=='number')S={money:0,lifetime:0,runEarned:0,totalBought:0,owned:{},branches:0,last:Date.now()};
+if(typeof S.runEarned!=='number')S.runEarned=S.lifetime||0;   // migrasi simpanan lama
+if(typeof S.totalBought!=='number')S.totalBought=Object.values(S.owned||{}).reduce((a,b)=>a+b,0);
 const mult=()=>1+0.25*S.branches;
 const cost=it=>Math.round(it.base*Math.pow(1.15,S.owned[it.id]||0));
 const rps=()=>ITEMS.reduce((a,it)=>a+(S.owned[it.id]||0)*it.rps,0)*mult();
 const rp=n=>'Rp'+Math.floor(n).toLocaleString('id-ID');
-function save(){S.last=Date.now();localStorage.setItem('warungTycoon',JSON.stringify(S))}
+function save(){S.last=Date.now();try{localStorage.setItem('warungTycoon',JSON.stringify(S))}catch(e){}}
+function earn(g){S.money+=g;S.lifetime+=g;S.runEarned+=g}
+const $=id=>document.getElementById(id);
+// Bangun daftar toko SEKALI; tick hanya memperbarui teks & status tombol
+// (sebelumnya DOM dibangun ulang tiap 500ms sehingga tombol beli sering
+//  lepas dari sentuhan/klik di tengah jalan).
+const shopRefs={};
+(function buildShop(){
+  const shop=$('shop');
+  ITEMS.forEach(it=>{
+    const d=document.createElement('div');d.className='item';
+    const left=document.createElement('div');left.style.cssText='display:flex;gap:10px;align-items:center';
+    const own=document.createElement('div');own.className='own';own.textContent='0';
+    const mid=document.createElement('div');
+    const b=document.createElement('b');b.textContent=it.icon+' '+it.name;
+    const sm=document.createElement('small');sm.textContent=it.desc;
+    const sm2=document.createElement('small');sm2.style.display='block';
+    mid.appendChild(b);mid.appendChild(sm);mid.appendChild(sm2);
+    left.appendChild(own);left.appendChild(mid);
+    const btn=document.createElement('button');btn.className='buy';
+    btn.onclick=()=>{const c=cost(it);if(S.money>=c){S.money-=c;S.owned[it.id]=(S.owned[it.id]||0)+1;S.totalBought++;save();render()}};
+    d.appendChild(left);d.appendChild(btn);shop.appendChild(d);
+    shopRefs[it.id]={own,btn,sm2,it};
+  });
+})();
+const ACHDEF=[
+ ['Kas pertama Rp1 juta',()=>S.lifetime>=1e6],
+ ['Sultan warung: Rp100 juta seumur warung',()=>S.lifetime>=1e8],
+ ['Kolektor: 25 aset pernah dibeli',()=>S.totalBought>=25],
+ ['Cabang pertama dibuka',()=>S.branches>=1],
+ ['Konglomerat: Rp10 miliar seumur warung',()=>S.lifetime>=1e10]];
 function render(){
-document.getElementById('money').textContent=rp(S.money);
-document.getElementById('persec').textContent=rp(rps());
-document.getElementById('perclick').textContent=rp(500*mult());
-document.getElementById('lifetime').textContent=rp(S.lifetime);
-document.getElementById('branches').textContent=S.branches;
-const shop=document.getElementById('shop');shop.innerHTML='';
-ITEMS.forEach(it=>{const c=cost(it);const d=document.createElement('div');d.className='item';
-d.innerHTML='<div style="display:flex;gap:10px;align-items:center"><div class="own">'+(S.owned[it.id]||0)+'</div><div><b>'+it.icon+' '+it.name+'</b><small>'+it.desc+'<br>'+rp(it.rps*mult())+'/detik per unit</small></div></div>';
-const b=document.createElement('button');b.className='buy';b.textContent='Beli '+rp(c);b.disabled=S.money<c;
-b.onclick=()=>{if(S.money>=c){S.money-=c;S.owned[it.id]=(S.owned[it.id]||0)+1;save();render()}};d.appendChild(b);shop.appendChild(d)});
-const totalOwned=Object.values(S.owned).reduce((a,b)=>a+b,0);
-const ach=document.getElementById('ach');ach.innerHTML='';
-[[ACH[0],S.lifetime>=1e6],[ACH[1],S.lifetime>=1e8],[ACH[2],totalOwned>=25],[ACH[3],S.branches>=1],[ACH[4],S.lifetime>=1e10]].forEach(([a,done])=>{const p=document.createElement('div');p.className='ach'+(done?' done':'');p.textContent=(done?'✅ ':'🔒 ')+a[1];ach.appendChild(p)});
-document.getElementById('prestige').disabled=S.lifetime<1e7;
+  $('money').textContent=rp(S.money);
+  $('persec').textContent=rp(rps());
+  $('perclick').textContent=rp(500*mult());
+  $('lifetime').textContent=rp(S.lifetime);
+  $('branches').textContent=S.branches;
+  for(const id in shopRefs){const r=shopRefs[id];const c=cost(r.it);
+    r.own.textContent=S.owned[id]||0;
+    r.sm2.textContent=rp(r.it.rps*mult())+'/detik per unit';
+    r.btn.textContent='Beli '+rp(c);r.btn.disabled=S.money<c;}
+  const ach=$('ach');ach.innerHTML='';
+  ACHDEF.forEach(([label,test])=>{const done=test();const p=document.createElement('div');
+    p.className='ach'+(done?' done':'');p.textContent=(done?'✅ ':'🔒 ')+label;ach.appendChild(p)});
+  const btn=$('prestige');
+  btn.disabled=S.runEarned<PRESTIGE_NEED;
+  btn.textContent=S.runEarned>=PRESTIGE_NEED?'🏪 Buka Cabang Baru':'🏪 Buka Cabang (perlu '+rp(PRESTIGE_NEED)+' pendapatan di putaran ini: '+rp(S.runEarned)+')';
 }
-document.getElementById('tap').onclick=()=>{const g=500*mult();S.money+=g;S.lifetime+=g;save();render()};
-document.getElementById('prestige').onclick=()=>{if(S.lifetime>=1e7&&confirm('Buka cabang? Kas & aset direset, bonus +25% permanen.')){S={money:0,lifetime:0,owned:{},branches:S.branches+1,last:Date.now()};save();render()}};
-document.getElementById('reset').onclick=()=>{if(confirm('Hapus semua progres?')){localStorage.removeItem('warungTycoon');location.reload()}};
-// offline earnings: 50% rate, cap 8 hours
-const away=Math.min((Date.now()-S.last)/1000,8*3600);const gain=rps()*away*0.5;
-if(gain>1000){S.money+=gain;S.lifetime+=gain;setTimeout(()=>alert('Selamat datang kembali! Warungmu menghasilkan '+rp(gain)+' selama kamu pergi (50%, maks 8 jam).'),300)}
+$('tap').onclick=()=>{earn(500*mult());save();render()};
+$('prestige').onclick=()=>{if(S.runEarned>=PRESTIGE_NEED&&confirm('Buka cabang? Kas & aset direset, bonus +25% permanen.')){
+  // PERBAIKAN: lifetime bersifat kumulatif (pencapaian tidak hilang) dan
+  // syarat prestise memakai pendapatan putaran ini (runEarned) — sebelumnya
+  // lifetime ikut direset sehingga pencapaian terkunci lagi, atau bila tidak
+  // direset pemain bisa prestise berulang tanpa bermain (eksploit).
+  S.money=0;S.runEarned=0;S.owned={};S.branches++;save();render()}};
+$('reset').onclick=()=>{if(confirm('Hapus semua progres?')){localStorage.removeItem('warungTycoon');location.reload()}};
+// Penghasilan saat pergi: 50%, maks 8 jam. Langsung disimpan setelah
+// diterapkan — sebelumnya bila tab ditutup <5 detik, rentang yang sama
+// dihitung dua kali pada kunjungan berikutnya.
+const away=Math.min(Math.max((Date.now()-(S.last||Date.now()))/1000,0),8*3600);
+const gain=rps()*away*0.5;
+if(gain>1000){earn(gain);save();setTimeout(()=>alert('Selamat datang kembali! Warungmu menghasilkan '+rp(gain)+' selama kamu pergi (50%, maks 8 jam).'),300)}
 let lastT=Date.now();
-setInterval(()=>{const now=Date.now();const dt=(now-lastT)/1000;lastT=now;const g=rps()*dt;if(g>0){S.money+=g;S.lifetime+=g}render()},500);
-setInterval(save,5000);render();
+setInterval(()=>{const now=Date.now();const dt=Math.min((now-lastT)/1000,60);lastT=now;const g=rps()*dt;if(g>0)earn(g);render()},500);
+setInterval(save,5000);
+render();
+
 </script>
 </body></html>
